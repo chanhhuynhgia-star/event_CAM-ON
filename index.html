@@ -141,7 +141,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--flame);outline-
 .le .tx{flex:1;min-width:0}
 .le .tx b{display:block;font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .le .tx span{font-size:12px;color:var(--muted)}
-.le .x{border:none;background:none;color:#CDB6A7;font-size:19px;cursor:pointer;padding:4px}
+.le .pen{font-style:normal;color:#D3BCAD;font-size:15px;padding:4px 2px;flex:0 0 auto}
 .empty{color:var(--muted);font-size:14px;padding:26px 2px;margin:0}
 
 .ghost{border:1px solid var(--line);background:#fff;border-radius:14px;padding:15px 0;flex:1;
@@ -280,6 +280,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--flame);outline-
     <input id="lQ" class="f" placeholder="Tìm tên hoặc số điện thoại">
     <div class="log" id="lList"></div>
     <p style="margin:12px 2px 0;font-size:12px;color:var(--muted)">Chạm một dòng để sửa lại thông tin.</p>
+    <div class="sync"><i class="dot" id="lDot"></i><span id="lTxt">Chưa cấu hình</span></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost dark" id="lSync">Đồng bộ ngay</button>
+      <button class="ghost" id="lWipe">Dọn dữ liệu máy</button>
+    </div>
   </section>
 
   <!-- ============ CÀI ĐẶT ============ -->
@@ -347,10 +352,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--flame);outline-
         <input id="mAmt" class="f big" type="tel" inputmode="numeric" style="text-align:right">
       </div>
       <button id="mSave" class="save">Lưu thay đổi</button>
-      <div class="row" style="margin-top:10px">
-        <button class="ghost" id="mDel">Xoá bản ghi</button>
-        <button class="ghost" id="mClose">Đóng</button>
-      </div>
+      <button class="ghost" id="mClose" style="width:100%;margin-top:10px">Đóng</button>
+      <p style="margin:12px 2px 0;font-size:12.5px;color:var(--muted);line-height:1.5">
+        Bản ghi không xoá được để tránh mất nhầm. Nếu nhập sai hoàn toàn, sửa lại thông tin cho đúng
+        hoặc báo quản lý xử lý trong Google Sheet.
+      </p>
     </div>
   </div>
 
@@ -370,7 +376,7 @@ const KEY='camon-field-v2';
 /* ⬇⬇ DÁN LINK APPS SCRIPT VÀO ĐÂY MỘT LẦN TRƯỚC KHI UPLOAD LÊN GITHUB ⬇⬇
    Khi có link ở đây, mọi điện thoại mở link app đều tự nối cloud,
    PG chỉ cần đăng nhập chứ không phải dán gì cả. */
-const CLOUD_URL='https://script.google.com/macros/s/AKfycbwR4HPMEt75IyN0wAtyiyBKLIYB_Z0oSVwzibgCHYOHlehNJJaerDM9lIl6-oBMXqfr/exec';
+const CLOUD_URL='https://script.google.com/macros/s/AKfycbyhNA9QB--lIYj1l1C7LTvl9xYq5xefXtnmbuuPBQaO6AJ9qbbwxB4TRiAw-FJtrTPQIw/exec';
 /* IMG được chèn ở cuối file (ảnh nhúng sẵn, chạy được cả khi mất mạng) */
 const ICONS=['','ao','non','chai','loc','logo'];
 const DEFAULTS={staff:'',event:'',url:'',role:'pg',pin:'',
@@ -698,14 +704,9 @@ function bind(){
   $('navOut').onclick=logout;
   $('cRefresh').onclick=()=>{pullState();toast('Đang tải lại từ cloud…')};
   $('cStockSave').onclick=saveStock;
-  $('cWipe').onclick=async()=>{
-    const pend=S.entries.filter(e=>!e.synced).length;
-    if(!confirm('Xoá toàn bộ bản ghi đang lưu trên máy này?\n'+
-      (pend?pend+' mục chưa gửi lên cloud sẽ mất.\n':'Dữ liệu trên Google Sheet không bị ảnh hưởng.\n')+
-      'Sau đó app sẽ tải lại từ cloud.'))return;
-    S.entries=[];S.dels=[];await save();syncBadge();renderGifts();renderLog();
-    pullState();toast('Đã dọn, đang tải lại từ cloud…');
-  };
+  $('cWipe').onclick=wipeLocal;
+  $('lWipe').onclick=wipeLocal;
+  $('lSync').onclick=()=>{pushCloud(true);if(isAdmin())pullState()};
 
   $('sName').oninput=e=>{sale.name=e.target.value;checkSale()};
   $('sPhone').oninput=e=>{sale.phone=dg(e.target.value);e.target.value=pp(sale.phone);
@@ -791,12 +792,7 @@ function add(o){
     staff:S.config.staff,event:S.config.event,synced:false,...o});
   save();pushCloud();renderGifts();
 }
-function del(id){
-  const e=S.entries.find(x=>x.id===id);
-  if(e&&e.synced){S.dels=S.dels||[];S.dels.push({id:id,type:e.type})}
-  S.entries=S.entries.filter(x=>x.id!==id);
-  save();renderLog();renderGifts();pushCloud();toast('Đã xoá');
-}
+
 
 /* ---------- THỐNG KÊ (game / quà / bán hàng tách riêng) ---------- */
 function inScope(){
@@ -846,6 +842,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 
 /* ---------- SỔ GHI ---------- */
 function renderLog(){
+  syncBadge();
   const q=($('lQ').value||'').toLowerCase();
   const L=S.entries.filter(e=>{
     if(logFilter!=='all'&&e.type!==logFilter)return false;
@@ -866,8 +863,7 @@ function renderLog(){
       iconOf(gi)?'<img class="icoq" src="'+iconOf(gi)+'" alt="">':
       '<i class="bar2" style="background:'+(e.type==='game'?'var(--flame)':'var(--ember)')+'"></i>')+
       '<div class="tx"><b>'+esc(e.name||'—')+' · '+pp(e.phone)+'</b><span>'+sub+' · '+t+(e.synced?' · ↑':'')+'</span></div>'+
-      '<button class="x">×</button>';
-    d.querySelector('.x').onclick=ev=>{ev.stopPropagation();del(e.id)};
+      '<i class="pen">✎</i>';
     d.onclick=()=>openEdit(e.id);
     if(ph.length)d.querySelector('.thumb').onclick=ev=>{ev.stopPropagation();xemAnh(ph)};
     c.appendChild(d);
@@ -901,7 +897,6 @@ function bindEdit(){
   $('mPhone').oninput=ev=>{ev.target.value=pp(dg(ev.target.value))};
   $('mAmt').oninput=ev=>{const n=+(ev.target.value.replace(/\D/g,'')||0);ev.target.value=n?fmt(n):''};
   $('mClose').onclick=()=>{$('modal').classList.add('hide');editId=null};
-  $('mDel').onclick=()=>{if(editId){del(editId);$('modal').classList.add('hide');editId=null}};
   $('mSave').onclick=async()=>{
     const e=S.entries.find(x=>x.id===editId); if(!e)return;
     const ph=dg($('mPhone').value);
@@ -916,15 +911,40 @@ function bindEdit(){
   };
 }
 
+/* ---------- DỌN DỮ LIỆU TRÊN MÁY ---------- */
+async function wipeLocal(){
+  const pend=S.entries.filter(e=>!e.synced);
+  const daGui=S.entries.length-pend.length;
+
+  if(!S.entries.length){toast('Máy đang trống, không có gì để dọn');return}
+
+  // PG chưa gửi hết thì không cho xoá — gửi lên cloud trước cho an toàn
+  if(pend.length&&!isAdmin()){
+    if(confirm('Còn '+pend.length+' mục chưa gửi lên cloud.\n\n'+
+       'Bấm OK để gửi ngay bây giờ. Gửi xong hãy bấm Dọn lại.'))pushCloud(true);
+    return;
+  }
+  const loi=pend.length
+    ? 'Xoá sạch dữ liệu trên máy này?\n\n'+pend.length+' mục CHƯA gửi lên cloud sẽ mất vĩnh viễn.'
+    : 'Xoá '+daGui+' bản ghi đang lưu trên máy này?\n\nDữ liệu trên Google Sheet không bị ảnh hưởng.';
+  if(!confirm(loi))return;
+
+  S.entries=[];
+  await save();syncBadge();renderGifts();checkGame();renderLog();
+  if(S.config.url)pullState();
+  toast('Đã dọn dữ liệu trên máy');
+}
+
 /* ---------- ĐỒNG BỘ CLOUD ---------- */
 function syncBadge(){
   const p=S.entries.filter(e=>!e.synced).length;
   const pics=S.entries.reduce((n,e)=>n+(e.fulls||[]).length,0);
-  const d=$('syncDot'),t=$('syncTxt');
-  if(!S.config.url){d.className='dot';t.textContent='Chưa cấu hình — dữ liệu chỉ nằm trên máy này';return}
-  if(p){d.className='dot wait';
-    t.textContent=p+' mục chờ gửi'+(pics?' · '+pics+' ảnh gốc đang giữ trên máy':'')}
-  else{d.className='dot ok';t.textContent='Đã đồng bộ toàn bộ'}
+  let cls='dot',txt;
+  if(!S.config.url){txt='Chưa cấu hình — dữ liệu chỉ nằm trên máy này'}
+  else if(p){cls='dot wait';txt=p+' mục chờ gửi'+(pics?' · '+pics+' ảnh gốc đang giữ trên máy':'')}
+  else{cls='dot ok';txt='Đã đồng bộ toàn bộ · '+S.entries.length+' bản ghi trên máy'}
+  ['syncDot','lDot'].forEach(i=>{const el=$(i);if(el)el.className=cls});
+  ['syncTxt','lTxt'].forEach(i=>{const el=$(i);if(el)el.textContent=txt});
 }
 let busy=false;
 async function pushCloud(manual){
@@ -932,16 +952,6 @@ async function pushCloud(manual){
   if(!S.config.url){if(manual)toast('Hãy dán link Apps Script trước',true);return}
   if(busy)return;
   busy=true;
-  // gửi các lệnh xoá trước
-  while((S.dels||[]).length){
-    const d=S.dels[0];
-    try{
-      const r=await fetch(S.config.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify({action:'delete',id:d.id,type:d.type})});
-      const j=await r.json();
-      if(j&&j.ok)S.dels.shift(); else break;
-    }catch(e){break}
-  }
   const pend=S.entries.filter(e=>!e.synced);
   if(!pend.length){busy=false;await save();syncBadge();if(manual)toast('Không có gì mới để gửi');return}
   if(manual)toast('Đang gửi '+pend.length+' mục…');
