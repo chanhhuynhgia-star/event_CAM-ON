@@ -657,6 +657,9 @@ function renderGifts(){
 function played(phone,skipId){
   if(!okPhone(phone))return false;
   const ev=S.config.event||'';
+  // đang sửa mà giữ nguyên số cũ thì không tính là trùng với chính mình
+  const self=skipId?S.entries.find(e=>e.id===skipId):null;
+  if(self&&self.phone===phone)return false;
   if((S.cloud.phones||[]).indexOf(phone)>-1)return true;
   return S.entries.some(e=>e.type==='game'&&e.phone===phone&&(e.event||'')===ev&&e.id!==skipId);
 }
