@@ -463,13 +463,13 @@ async function pullState(){
   if(!S.config.url)return renderGate();
   try{
     const r=await fetch(S.config.url+'?action=state&event='+encodeURIComponent(S.config.event||'')
-      +(isAdmin()?'&all=1':''));
+      +'&all=1'+(isAdmin()?'':'&staff='+encodeURIComponent(S.config.staff||'')));
     const j=await r.json();
     if(j&&j.ok){
       S.cloud={event:j.event||'',alloc:j.alloc||{},used:j.used||{},roster:j.roster||[],
                phones:j.phones||[],ts:Date.now()};
       if(j.event)S.config.event=j.event;
-      if(isAdmin()&&j.entries)mergeRemote(j.entries);
+      if(j.entries)mergeRemote(j.entries);
       save();paintConfig();renderGifts();renderGate();checkGame();
       if(screen==='stats')renderStats();
       if(screen==='log')renderLog();
