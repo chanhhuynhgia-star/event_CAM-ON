@@ -322,6 +322,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--flame);outline-
       <div class="sync"><i class="dot" id="syncDot"></i><span id="syncTxt">Chưa cấu hình</span></div>
       <div class="row" style="margin-top:12px">
         <button class="ghost dark" id="cSync">Đồng bộ ngay</button>
+        <button class="ghost" id="cWipe">Dọn dữ liệu máy</button>
       </div>
     </div>
   </section>
@@ -470,15 +471,16 @@ async function pullState(){
     }
   }catch(e){renderGate()}
 }
-/* admin: gộp bản ghi của các máy khác vào sổ để xem và sửa */
+/* admin: bản ghi của các máy khác được lấy về để xem và sửa.
+   Mỗi lần tải là dựng lại đúng theo Sheet, tránh giữ lại dòng đã bị xoá. */
 function mergeRemote(list){
-  const have=new Set(S.entries.map(e=>e.id));
-  list.forEach(r=>{
-    if(have.has(r.id))return;
-    S.entries.push({...r,ts:Date.parse(r.ts.replace(' ','T'))||Date.now(),
-      synced:true,remote:true,event:S.config.event});
-  });
-  S.entries.sort((a,b)=>b.ts-a.ts);
+  const ev=S.config.event||'';
+  const own=S.entries.filter(e=>!e.remote||(e.event||'')!==ev);
+  const have=new Set(own.map(e=>e.id));
+  const them=list.filter(r=>!have.has(r.id)).map(r=>({...r,
+    ts:Date.parse(String(r.ts).replace(' ','T'))||Date.now(),
+    synced:true,remote:true,event:ev}));
+  S.entries=own.concat(them).sort((a,b)=>b.ts-a.ts);
 }
 /* ---------- ADMIN: phân bổ tồn kho ---------- */
 function renderStock(){
@@ -696,6 +698,14 @@ function bind(){
   $('navOut').onclick=logout;
   $('cRefresh').onclick=()=>{pullState();toast('Đang tải lại từ cloud…')};
   $('cStockSave').onclick=saveStock;
+  $('cWipe').onclick=async()=>{
+    const pend=S.entries.filter(e=>!e.synced).length;
+    if(!confirm('Xoá toàn bộ bản ghi đang lưu trên máy này?\n'+
+      (pend?pend+' mục chưa gửi lên cloud sẽ mất.\n':'Dữ liệu trên Google Sheet không bị ảnh hưởng.\n')+
+      'Sau đó app sẽ tải lại từ cloud.'))return;
+    S.entries=[];S.dels=[];await save();syncBadge();renderGifts();renderLog();
+    pullState();toast('Đã dọn, đang tải lại từ cloud…');
+  };
 
   $('sName').oninput=e=>{sale.name=e.target.value;checkSale()};
   $('sPhone').oninput=e=>{sale.phone=dg(e.target.value);e.target.value=pp(sale.phone);
@@ -847,10 +857,10 @@ function renderLog(){
   L.forEach(e=>{
     const d=document.createElement('div');d.className='le';
     const D=new Date(e.ts),t=(today(e.ts)?'':dmy(D)+' ')+hms(D);
+    const ph=e.photos||[];
     const soAnh=ph.length||e.soAnh||0;
     const sub=(e.type==='game'?esc(e.gift||'')+(soAnh?' · '+soAnh+' ảnh ✓':' · chưa có ảnh'):fmt(e.amount)+'đ'+(e.items?' · '+esc(e.items):''))
       +(e.staff?' · '+esc(e.staff):'');
-    const ph=e.photos||[];
     const gi=e.type==='game'?(S.config.gifts.find(x=>x.name===e.gift)||{}).icon:'';
     d.innerHTML=(ph.length?'<img class="thumb" src="'+ph[0]+'">':
       iconOf(gi)?'<img class="icoq" src="'+iconOf(gi)+'" alt="">':
